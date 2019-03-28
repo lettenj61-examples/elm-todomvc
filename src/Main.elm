@@ -4,12 +4,13 @@ port module Main exposing (..)
 
 This application is broken up into three key parts:
 
-  1. Model  - a full definition of the application's state
-  2. Update - a way to step the application state forward
-  3. View   - a way to visualize our application state with HTML
+1.  Model - a full definition of the application's state
+2.  Update - a way to step the application state forward
+3.  View - a way to visualize our application state with HTML
 
 This clean division of concerns is a core part of Elm. You can read more about
 this in <http://guide.elm-lang.org/architecture/index.html>
+
 -}
 
 import Browser
@@ -27,13 +28,22 @@ main : Program (Maybe Model) Model Msg
 main =
     Browser.document
         { init = init
-        , view = \model -> { title = "Elm • TodoMVC", body = [view model] }
+        , view = \model -> { title = "Elm :: TodoMVC", body = [ view model ] }
         , update = updateWithStorage
-        , subscriptions = \_ -> Sub.none
+        , subscriptions = subscriptions
         }
 
 
 port setStorage : Model -> Cmd msg
+
+
+port download : () -> Cmd msg
+
+
+port requestImport : String -> Cmd msg
+
+
+port importJson : (Model -> msg) -> Sub msg
 
 
 {-| We want to `setStorage` on every update. This function adds the setStorage
@@ -45,21 +55,22 @@ updateWithStorage msg model =
         ( newModel, cmds ) =
             update msg model
     in
-        ( newModel
-        , Cmd.batch [ setStorage newModel, cmds ]
-        )
+    ( newModel
+    , Cmd.batch [ setStorage { newModel | uploadContent = "" }, cmds ]
+    )
 
 
 
 -- MODEL
-
-
 -- The full application state of our todo app.
+
+
 type alias Model =
     { entries : List Entry
     , field : String
     , uid : Int
     , visibility : String
+    , uploadContent : String
     }
 
 
@@ -77,6 +88,7 @@ emptyModel =
     , visibility = "All"
     , field = ""
     , uid = 0
+    , uploadContent = ""
     }
 
 
@@ -91,9 +103,9 @@ newEntry desc id =
 
 init : Maybe Model -> ( Model, Cmd Msg )
 init maybeModel =
-  ( Maybe.withDefault emptyModel maybeModel
-  , Cmd.none
-  )
+    ( Maybe.withDefault emptyModel maybeModel
+    , Cmd.none
+    )
 
 
 
@@ -115,10 +127,20 @@ type Msg
     | Check Int Bool
     | CheckAll Bool
     | ChangeVisibility String
+    | Download
+    | RequestImport
+    | UpdateImport String
+    | ImportComplete Model
+
+
+type Sorter
+    = TaskName
 
 
 
 -- How we update our Model on a given Msg?
+
+
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
@@ -132,6 +154,7 @@ update msg model =
                 , entries =
                     if String.isEmpty model.field then
                         model.entries
+
                     else
                         model.entries ++ [ newEntry model.field model.uid ]
               }
@@ -148,6 +171,7 @@ update msg model =
                 updateEntry t =
                     if t.id == id then
                         { t | editing = isEditing }
+
                     else
                         t
 
@@ -163,6 +187,7 @@ update msg model =
                 updateEntry t =
                     if t.id == id then
                         { t | description = task }
+
                     else
                         t
             in
@@ -185,6 +210,7 @@ update msg model =
                 updateEntry t =
                     if t.id == id then
                         { t | completed = isCompleted }
+
                     else
                         t
             in
@@ -206,6 +232,29 @@ update msg model =
             , Cmd.none
             )
 
+        Download ->
+            ( model, download () )
+
+        RequestImport ->
+            ( model, requestImport model.uploadContent )
+
+        UpdateImport content ->
+            ( { model | uploadContent = content }
+            , Cmd.none
+            )
+
+        ImportComplete loadedModel ->
+            ( loadedModel, Cmd.none )
+
+
+
+-- SUBSCRIPTIONS
+
+
+subscriptions : Model -> Sub Msg
+subscriptions model =
+    importJson ImportComplete
+
 
 
 -- VIEW
@@ -213,13 +262,14 @@ update msg model =
 
 view : Model -> Html Msg
 view model =
-    div
-        [ class "todomvc-wrapper"
-        , style "visibility" "hidden"
+    section
+        [ class "section"
+
+        --, style "visibility" "hidden"
         ]
-        [ section
-            [ class "todoapp" ]
-            [ lazy viewInput model.field
+        [ div
+            [ class "container" ]
+            [ lazy viewInput ( model.field, model.uploadContent )
             , lazy2 viewEntries model.visibility model.entries
             , lazy2 viewControls model.visibility model.entries
             ]
@@ -227,21 +277,44 @@ view model =
         ]
 
 
-viewInput : String -> Html Msg
-viewInput task =
+viewInput : ( String, String ) -> Html Msg
+viewInput ( task, content ) =
     header
-        [ class "header" ]
-        [ h1 [] [ text "todos" ]
-        , input
-            [ class "new-todo"
-            , placeholder "What needs to be done?"
-            , autofocus True
-            , value task
-            , name "newTodo"
-            , onInput UpdateField
-            , onEnter Add
+        []
+        [ h1 [ class "title" ] [ text "todos" ]
+        , wrapControl <|
+            input
+                [ class "input"
+                , placeholder "What needs to be done?"
+                , autofocus True
+                , value task
+                , name "newTodo"
+                , onInput UpdateField
+                , onEnter Add
+                ]
+                []
+        , wrapControl <|
+            input
+                [ class "input"
+                , value content
+                , onInput UpdateImport
+                ]
+                []
+        , div
+            [ class "field is-grouped" ]
+            [ wrapIn "p" "control" <|
+                button
+                    [ class "button"
+                    , onClick RequestImport
+                    ]
+                    [ text "Upload" ]
+            , wrapIn "p" "control" <|
+                button
+                    [ class "button is-link"
+                    , onClick Download
+                    ]
+                    [ text "Download" ]
             ]
-            []
         ]
 
 
@@ -251,10 +324,21 @@ onEnter msg =
         isEnter code =
             if code == 13 then
                 Json.succeed msg
+
             else
                 Json.fail "not ENTER"
     in
-        on "keydown" (Json.andThen isEnter keyCode)
+    on "keydown" (Json.andThen isEnter keyCode)
+
+
+wrapIn : String -> String -> Html msg -> Html msg
+wrapIn nodeType className node_ =
+    node nodeType [ class className ] [ node_ ]
+
+
+wrapControl : Html msg -> Html msg
+wrapControl node_ =
+    wrapIn "div" "field" <| wrapIn "p" "control" <| node_
 
 
 
@@ -281,14 +365,12 @@ viewEntries visibility entries =
         cssVisibility =
             if List.isEmpty entries then
                 "hidden"
+
             else
                 "visible"
-    in
-        section
-            [ class "main"
-            , style "visibility" cssVisibility
-            ]
-            [ input
+
+        allToggleBox =
+            input
                 [ class "toggle-all"
                 , type_ "checkbox"
                 , name "toggle"
@@ -296,12 +378,20 @@ viewEntries visibility entries =
                 , onClick (CheckAll (not allCompleted))
                 ]
                 []
-            , label
-                [ for "toggle-all" ]
-                [ text "Mark all as complete" ]
-            , Keyed.ul [ class "todo-list" ] <|
-                List.map viewKeyedEntry (List.filter isVisible entries)
-            ]
+    in
+    div
+        [ class "field"
+        , style "visibility" cssVisibility
+        ]
+        [ wrapControl <|
+            label
+                [ class "checkbox"
+                , for "toggle-all"
+                ]
+                [ allToggleBox, text "Mark all as complete" ]
+        , Keyed.ul [ class "todo-list", id "todo-list" ] <|
+            List.map viewKeyedEntry (List.filter isVisible entries)
+        ]
 
 
 
@@ -315,36 +405,46 @@ viewKeyedEntry todo =
 
 viewEntry : Entry -> Html Msg
 viewEntry todo =
+    let
+        editingStyle =
+            if todo.editing then
+                ""
+
+            else
+                "not-editing"
+    in
     li
-        [ classList [ ( "completed", todo.completed ), ( "editing", todo.editing ) ] ]
+        []
         [ div
-            [ class "view" ]
-            [ input
-                [ class "toggle"
-                , type_ "checkbox"
-                , checked todo.completed
-                , onClick (Check todo.id (not todo.completed))
-                ]
-                []
-            , label
-                [ onDoubleClick (EditingEntry todo.id True) ]
-                [ text todo.description ]
+            [ class "field is-grouped" ]
+            [ wrapIn "p" "control" <|
+                input
+                    [ type_ "checkbox"
+                    , checked todo.completed
+                    , onClick (Check todo.id (not todo.completed))
+                    ]
+                    []
+            , wrapIn "p" "control is-expanded" <|
+                input
+                    [ class "input"
+                    , class editingStyle
+                    , disabled todo.completed
+                    , value todo.description
+                    , name "title"
+                    , id ("todo-" ++ String.fromInt todo.id)
+                    , onInput (UpdateEntry todo.id)
+
+                    --, onBlur (EditingEntry todo.id False)
+                    --, onEnter (EditingEntry todo.id False)
+                    --, onFocus (EditingEntry todo.id True)
+                    ]
+                    []
             , button
-                [ class "destroy"
+                [ class "delete"
                 , onClick (Delete todo.id)
                 ]
                 []
             ]
-        , input
-            [ class "edit"
-            , value todo.description
-            , name "title"
-            , id ("todo-" ++ String.fromInt todo.id)
-            , onInput (UpdateEntry todo.id)
-            , onBlur (EditingEntry todo.id False)
-            , onEnter (EditingEntry todo.id False)
-            ]
-            []
         ]
 
 
@@ -361,14 +461,14 @@ viewControls visibility entries =
         entriesLeft =
             List.length entries - entriesCompleted
     in
-        footer
-            [ class "footer"
-            , hidden (List.isEmpty entries)
-            ]
-            [ lazy viewControlsCount entriesLeft
-            , lazy viewControlsFilters visibility
-            , lazy viewControlsClear entriesCompleted
-            ]
+    footer
+        [ class "footer"
+        , hidden (List.isEmpty entries)
+        ]
+        [ lazy viewControlsCount entriesLeft
+        , lazy viewControlsFilters visibility
+        , lazy viewControlsClear entriesCompleted
+        ]
 
 
 viewControlsCount : Int -> Html Msg
@@ -377,41 +477,42 @@ viewControlsCount entriesLeft =
         item_ =
             if entriesLeft == 1 then
                 " item"
+
             else
                 " items"
     in
-        span
-            [ class "todo-count" ]
-            [ strong [] [ text (String.fromInt entriesLeft) ]
-            , text (item_ ++ " left")
-            ]
+    span
+        [ class "todo-count" ]
+        [ strong [] [ text (String.fromInt entriesLeft) ]
+        , text (item_ ++ " left")
+        ]
 
 
 viewControlsFilters : String -> Html Msg
 viewControlsFilters visibility =
-    ul
-        [ class "filters" ]
+    div
+        [ class "field has-addons" ]
         [ visibilitySwap "#/" "All" visibility
-        , text " "
         , visibilitySwap "#/active" "Active" visibility
-        , text " "
         , visibilitySwap "#/completed" "Completed" visibility
         ]
 
 
 visibilitySwap : String -> String -> String -> Html Msg
 visibilitySwap uri visibility actualVisibility =
-    li
-        [ onClick (ChangeVisibility visibility) ]
-        [ a [ href uri, classList [ ( "selected", visibility == actualVisibility ) ] ]
-            [ text visibility ]
-        ]
+    wrapIn "p" "control" <|
+        a
+            [ onClick (ChangeVisibility visibility)
+            , class "button"
+            , href uri
+            ]
+            [ span [] [ text visibility ] ]
 
 
 viewControlsClear : Int -> Html Msg
 viewControlsClear entriesCompleted =
     button
-        [ class "clear-completed"
+        [ class "button is-warning"
         , hidden (entriesCompleted == 0)
         , onClick DeleteComplete
         ]

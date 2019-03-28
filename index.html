@@ -1,23 +1,47 @@
 <!DOCTYPE HTML>
-<html>
+<html lang="en">
 
 <head>
   <meta charset="UTF-8">
-  <title>Elm • TodoMVC</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <title>Elm :: TodoMVC</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/downloadjs/1.4.8/download.min.js" integrity="sha256-k77iqKeo6Og1Lf5mawux2rTxjaV9zUtyOWKVX3VttKE=" crossorigin="anonymous"></script>
   <script type="text/javascript" src="elm.js"></script>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bulma/0.7.4/css/bulma.min.css" integrity="sha256-8B1OaG0zT7uYA572S2xOxWACq9NXYPQ+U5kHPV1bJN4=" crossorigin="anonymous" />
+  <link rel="stylesheet" href="custom.css">
 </head>
 
 <body>
 </body>
 
 <script type="text/javascript">
-var storedState = localStorage.getItem('elm-todo-save');
-var startingState = storedState ? JSON.parse(storedState) : null;
-var app = Elm.Main.init({ flags: startingState });
-app.ports.setStorage.subscribe(function(state) {
-    localStorage.setItem('elm-todo-save', JSON.stringify(state));
-});
+  var storageKey = 'elm-todo-save';
+  var storedState = localStorage.getItem(storageKey);
+  var startingState = storedState ? JSON.parse(storedState) : null;
+  var app = Elm.Main.init({
+    flags: startingState
+  });
+  app.ports.setStorage.subscribe(function (state) {
+    localStorage.setItem(storageKey, JSON.stringify(state));
+  });
+  app.ports.download.subscribe(function () {
+    download(localStorage.getItem(storageKey), storageKey + '.json', 'application/json');
+  });
+  app.ports.requestImport.subscribe(function (value) {
+    var newState = null;
+    try {
+      newState = JSON.parse(value);
+      if (newState && newState.uploadContent === undefined) {
+        newState.uploadContent = '';
+      }
+    } catch (e) {
+      alert('ERROR! ' + (e instanceof Error) ? e.message : '');
+    }
+    if (newState != null) {
+      app.ports.importJson.send(newState);
+    }
+  });
 </script>
 
 </html>
