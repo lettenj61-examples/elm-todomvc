@@ -1,0 +1,9 @@
+#todo-list input.input {
+  font-family: monospace;
+  font-size: 18px;
+}
+
+.not-editing {
+  border-color: white;
+  box-shadow: none;
+}
